@@ -38,7 +38,6 @@ class Factory(object):
             'android': phones.AndroidPhone,
             'android_old': phones.AndroidOldPhone,
             'iphone': phones.iPhone,
-            'nexus4': phones.Nexus4,
             'abro': phones.Abro,
         }
 
