@@ -6,6 +6,7 @@ import re
 import queue as q
 import pkg_resources
 import time
+import signal
 
 from volta.common.interfaces import Phone
 from volta.common.util import execute, Drain, popen, LogReader, PhoneTestPerformer
@@ -145,7 +146,7 @@ class AndroidPhone(Phone):
         self.drain_logcat_stdout = Drain(self.logcat_reader_stdout, self.phone_q)
         self.drain_logcat_stdout.start()
 
-        self.phone_q_err=q.Queue()
+        self.phone_q_err = q.Queue()
         self.logcat_reader_stderr = LogReader(self.logcat_process.stderr, self.compiled_regexp)
         self.drain_logcat_stderr = Drain(self.logcat_reader_stderr, self.phone_q_err)
         self.drain_logcat_stderr.start()
@@ -168,16 +169,15 @@ class AndroidPhone(Phone):
 
     def end(self):
         """ Stop test and grabbers """
+        self.logcat_process.send_signal(signal.SIGINT)
+        # self.logcat_process.kill()
         if self.test_performer:
             self.test_performer.close()
             self.test_performer.join()
         self.logcat_reader_stdout.close()
         self.logcat_reader_stderr.close()
-        self.logcat_process.kill()
         self.drain_logcat_stdout.close()
-        self.drain_logcat_stdout.join()
         self.drain_logcat_stderr.close()
-        self.drain_logcat_stderr.join()
 
         # apps cleanup
         for apk in self.cleanup_apps:

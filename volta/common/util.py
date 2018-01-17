@@ -27,7 +27,6 @@ def popen(cmnd):
     return subprocess.Popen(
         cmnd,
         bufsize=0,
-        preexec_fn=os.setsid,
         close_fds=True,
         shell=True,
         stdout=subprocess.PIPE,
@@ -46,6 +45,7 @@ class Drain(threading.Thread):
         self.destination = destination
         self._finished = threading.Event()
         self._interrupted = threading.Event()
+        self.setDaemon(True)  # bdk+ytank stuck w/o this at join of this thread
 
     def run(self):
         for item in self.source:
@@ -163,6 +163,7 @@ class Tee(threading.Thread):
         self.type = type
         self._finished = threading.Event()
         self._interrupted = threading.Event()
+        self.setDaemon(True)  # just in case, bdk+ytank stuck w/o this at join of Drain thread
 
     def run(self):
         while not self._interrupted.is_set():
@@ -221,7 +222,7 @@ class LogReader(object):
     def __iter__(self):
         while not self.closed:
             yield self._read_chunk()
-        yield self._read_chunk()
+        # yield self._read_chunk()
 
     def close(self):
         self.closed = True
@@ -256,12 +257,16 @@ def chunk_to_df(chunk, regexp):
                     )
                 except IndexError:
                     # android fmt, sample: 02-12 12:12:12.121
-                    ts = datetime.datetime.strptime("{date} {time}".format(
-                            date=match.group('date'),
-                            time=match.group('time')),
-                        '%m-%d %H:%M:%S.%f').replace(
-                        year=datetime.datetime.now().year
-                    )
+                    try:
+                        ts = datetime.datetime.strptime("{date} {time}".format(
+                                date=match.group('date'),
+                                time=match.group('time')),
+                            '%m-%d %H:%M:%S.%f').replace(
+                            year=datetime.datetime.now().year
+                        )
+                    except ValueError:
+                        logger.warning('Trash data in logs: %s, skipped', match.groups())
+                        continue
                 # unix timestamp in microseconds
                 sys_uts = int(
                     (ts-datetime.datetime(1970,1,1)).total_seconds() * 10 ** 6
@@ -300,10 +305,15 @@ class PhoneTestPerformer(threading.Thread):
 
     def run(self):
         self.retcode, _, _ = execute(self.command, shell=True)
+        logger.info('Phone test performer work finished, retcode: %s', self.retcode)
         self._finished.set()
 
     def wait(self, timeout=None):
         self._finished.wait(timeout=timeout)
 
     def close(self):
+        logger.info('Phone test performer got interrupt signal')
         self._interrupted.set()
+
+    def is_finished(self):
+        return self._finished
