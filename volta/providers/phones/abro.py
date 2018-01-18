@@ -94,18 +94,18 @@ class Abro(Phone):
 
 
     def end(self):
+        self.logcat_process.kill()
         if self.test_performer:
             self.test_performer.close()
             #self.test_performer.join()
         self.logcat_reader_stdout.close()
         self.logcat_reader_stderr.close()
-        self.logcat_process.kill()
         self.drain_logcat_stdout.close()
-        logger.info('drain_logcat_stdout.join()')
-        self.drain_logcat_stdout.join()
+        #logger.info('drain_logcat_stdout.join()')
+        #self.drain_logcat_stdout.join()
         self.drain_logcat_stderr.close()
         #self.drain_logcat_stderr.join()
-        logger.info('abdo test ended')
+        #logger.info('abdo test ended')
         return
 
 
