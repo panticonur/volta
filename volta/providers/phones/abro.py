@@ -2,6 +2,7 @@ import logging
 import re
 import queue as q
 import pkg_resources
+import signal
 
 from volta.common.interfaces import Phone
 from volta.common.util import execute, Drain, popen, LogReader, PhoneTestPerformer
