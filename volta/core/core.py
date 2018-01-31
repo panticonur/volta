@@ -136,7 +136,8 @@ class Core(object):
     @property
     def artifacts_dir(self):
         if not self._artifacts_dir:
-            dir_name = "{dir}/{id}".format(dir=self.config.get_option(self.SECTION, 'artifacts_dir'), id=self.test_id)
+            #dir_name = "{dir}/{id}".format(dir=self.config.get_option(self.SECTION, 'artifacts_dir'), id=self.test_id)
+            dir_name = self.config.get_option(self.SECTION, 'artifacts_dir')
             if not os.path.isdir(dir_name):
                 os.makedirs(dir_name)
             os.chmod(dir_name, 0o755)
@@ -310,7 +311,7 @@ class Core(object):
             self.uploader.update_job(update_job_data)
             if self.uploader.jobno:
                 logger.info('Report url: %s/mobile/%s', self.uploader.hostname, self.uploader.jobno)
-                self.__test_id_link_to_jobno(self.uploader.jobno)
+                #self.__test_id_link_to_jobno(self.uploader.jobno)
             self.uploader.close()
         logger.info('Finished!')
 

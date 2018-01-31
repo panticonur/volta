@@ -77,7 +77,7 @@ class DataUploader(DataListener):
             self.jobno = req.json()['jobno']
             logger.info('Lunapark test id: %s', self.jobno)
             logger.info('Report url: %s/mobile/%s', self.hostname, self.jobno)
-            self.dump_jobno_to_file()
+            #self.dump_jobno_to_file()
 
     def dump_jobno_to_file(self):
         try:
