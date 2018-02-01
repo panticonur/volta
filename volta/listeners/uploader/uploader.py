@@ -99,7 +99,7 @@ class DataUploader(DataListener):
                 self.jobno = req.json()['jobno']
                 logger.info('Lunapark test id: %s', self.jobno)
                 logger.info('Report url: %s/mobile/%s', self.hostname, self.jobno)
-                self.dump_jobno_to_file()
+                #self.dump_jobno_to_file()
         else:
             raise RuntimeError('Failed to create Lunapark test_id, is there a connection to Lunapark?')
 
