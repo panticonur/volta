@@ -5,8 +5,11 @@ import numpy as np
 import json
 
 from volta.common.interfaces import VoltaBox
-from volta.common.util import Drain, TimeChopper, string_to_np
-from volta.common.resource import manager as resource
+from volta.common.util import TimeChopper, string_to_np
+
+from netort.data_processing import Drain
+from netort.resource import manager as resource
+
 from ctypes import *
 # https://docs.python.org/2/library/ctypes.html
 
@@ -29,7 +32,7 @@ class YattorBox(VoltaBox):
         self.grab_timeout = config.get_option('volta', 'grab_timeout', 1)
         #self.slope = config.get_option('volta', 'slope', 1)
         #self.offset = config.get_option('volta', 'offset', 0)
-        if self.lib.yattor_open()!=0:
+        if self.lib.yattor_open(1)!=0:
             RuntimeError("Unable to open yattor")
         self.grabber_q = None
 
@@ -96,11 +99,13 @@ class YattorReader(object):
 
     def _read_chunk(self):
         #amount = self.lib.yattor_read_ampere_float(-1, self.sample_rate*2, self.floatBuffer)
-        amount = self.lib.yattor_read_milliampere(-1, self.sample_rate*2, self.wordBuffer)
+        amount = self.lib.yattor_read_milliampere(-1, self.sample_rate, self.wordBuffer)
         if amount>0:
             #chunk = np.frombuffer(buffer=self.floatBuffer, dtype=np.float32, count=amount)
             chunk = np.frombuffer(buffer=self.wordBuffer, dtype=np.uint16, count=amount)#.astype(np.float32)
             return chunk
+        else:
+            time.sleep(0.5)
 
 
     """def _read_chunk(self):

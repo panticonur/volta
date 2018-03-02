@@ -1,12 +1,13 @@
 import logging
 import re
-import queue as q
 import pkg_resources
-import signal
+import time
+
+from netort.data_processing import Drain, get_nowait_from_queue
+from netort.resource import manager as resource
 
 from volta.common.interfaces import Phone
-from volta.common.util import execute, Drain, popen, LogReader, PhoneTestPerformer
-from volta.common.resource import manager as resource
+from volta.common.util import LogParser, Executioner
 
 
 logger = logging.getLogger(__name__)
@@ -30,93 +31,89 @@ class Abro(Phone):
         Phone.__init__(self, config)
         self.logcat_stdout_reader = None
         self.logcat_stderr_reader = None
-        self.source = config.get_option('phone', 'source', 'serial_number')
-        self.blink = config.get_option('phone', 'blink', False)
-        self.delay = config.get_option('phone', 'blink_delay', 0)
-        self.toast = config.get_option('phone', 'blink_toast', False)
-        self.led = config.get_option('phone', 'led', True)
-        self.threads = config.get_option('phone', 'threads', 1)
-        self.blinks = config.get_option('phone', 'blinks', 10)
-        self.camera_manager = config.get_option('phone', 'camera_manager', False)
-        self.regexp = config.get_option('phone', 'event_regexp', event_regexp)
-        logger.debug(self.regexp)
+        self.source = config.get_option('phone', 'source')
         try:
-            self.compiled_regexp = re.compile(self.regexp, re.VERBOSE | re.IGNORECASE)
-        except:
+            self.compiled_regexp = re.compile(
+                config.get_option('phone', 'event_regexp', event_regexp), re.VERBOSE | re.IGNORECASE
+            )
+        except SyntaxError:
             logger.debug('Unable to parse specified regexp', exc_info=True)
-            raise RuntimeError("Unable to parse specified regexp")
-        self.drain_logcat_stdout = None
+            raise RuntimeError(
+                "Unable to parse specified regexp: %s" % config.get_option('phone', 'event_regexp', event_regexp)
+            )
+        self.logcat_pipeline = None
         self.test_performer = None
+        self.phone_q = None
+
+
+    def adb_execution(self, cmd):
+        def read_process_queues_and_report(outs_q, errs_q):
+            outputs = get_nowait_from_queue(outs_q)
+            for chunk in outputs:
+                logger.debug('Command \'%s\' output: %s', cmd, chunk.strip('\n'))
+            errors = get_nowait_from_queue(errs_q)
+            if errors:
+                worker.close()
+                raise RuntimeError(
+                    'There were errors executing \'%s\' on device %s. Errors :%s' % (cmd, self.source, errors)
+                )
+        worker = Executioner(cmd)
+        outs_q, errs_q = worker.execute()
+        while worker.is_finished() is None:
+            read_process_queues_and_report(outs_q, errs_q)
+            time.sleep(1)
+        read_process_queues_and_report(outs_q, errs_q)
+        while not outs_q.qsize() != 0 and errs_q.qsize() != 0:
+            time.sleep(0.5)
+        worker.close()
+        logger.info('Command \'%s\' executed on device %s. Retcode: %s', cmd, self.source, worker.is_finished())
+        if worker.is_finished() != 0:
+            raise RuntimeError('Failed to execute adb command \'%s\'' % cmd)
 
 
     def prepare(self):
-        execute("adb -s {device_id} logcat -c".format(device_id=self.source))
+        self.adb_execution("adb -s {device_id} logcat -c".format(device_id=self.source))
 
 
     def start(self, results):
         self.phone_q = results
         self.__start_async_logcat()
-        if self.blink:
-            cmd = "adb -s {device_id} shell am startservice -a BLINK --ei DELAY {delay} --ez TOAST {toast} --ez LED {led} --ei THREADS {threads} --ei BLINKS {blinks} --ez MGR {mgr} -n com.yandex.pma/.PmaIntentService".format(
-                device_id = self.source,
-                delay = self.delay,
-                toast = self.toast,
-                led = self.led,
-                threads = self.threads,
-                blinks = self.blinks,
-                mgr = self.camera_manager
-            )
-            logger.info(cmd)
-            execute(cmd)
-        return
 
 
     def __start_async_logcat(self):
         cmd = "adb -s {device_id} logcat -v time".format(device_id=self.source)
-        logger.debug("Execute : %s", cmd)
-        self.logcat_process = popen(cmd)
+        self.worker = Executioner(cmd)
+        out_q, err_q = self.worker.execute()
 
-        self.logcat_reader_stdout = LogReader(self.logcat_process.stdout, self.compiled_regexp)
-        self.drain_logcat_stdout = Drain(self.logcat_reader_stdout, self.phone_q)
-        self.drain_logcat_stdout.start()
-
-        self.phone_q_err=q.Queue()
-        self.logcat_reader_stderr = LogReader(self.logcat_process.stderr, self.compiled_regexp)
-        self.drain_logcat_stderr = Drain(self.logcat_reader_stderr, self.phone_q_err)
-        self.drain_logcat_stderr.start()
+        self.logcat_pipeline = Drain(
+            LogParser(
+                out_q, self.compiled_regexp, self.config.get_option('phone', 'type')
+            ),
+            self.phone_q
+        )
+        self.logcat_pipeline.start()
 
 
     def run_test(self):
-        #logger.info('Infinite loop for volta because there are no tests specified, waiting for SIGINT')
-        command = 'while [ 1 ]; do sleep 1; done'
-        self.test_performer = PhoneTestPerformer(command)
-        #self.test_performer.start()
-        return
+        logger.info('Infinite loop for volta because there are no tests specified, waiting for SIGINT')
+        cmd = '/bin/bash -c \'while [ 1 ]; do sleep 1; done\''
+        logger.info('Command \'%s\' executing...', cmd)
+        self.test_performer = Executioner(cmd)
+        self.test_performer.execute()
 
 
     def end(self):
-        self.logcat_process.send_signal(signal.SIGINT)
-        #self.logcat_process.kill()
+        self.worker.close()
         if self.test_performer:
             self.test_performer.close()
-            #self.test_performer.join()
-        self.logcat_reader_stdout.close()
-        self.logcat_reader_stderr.close()
-        self.drain_logcat_stdout.close()
-        #logger.info('drain_logcat_stdout.join()')
-        #self.drain_logcat_stdout.join()
-        self.drain_logcat_stderr.close()
-        #self.drain_logcat_stderr.join()
-        #logger.info('abdo test ended')
-        return
+        if self.logcat_pipeline:
+            self.logcat_pipeline.close()
 
 
     def get_info(self):
         data = {}
-        if self.drain_logcat_stdout:
-            data['grabber_alive'] = self.drain_logcat_stdout.isAlive()
         if self.phone_q:
             data['grabber_queue_size'] = self.phone_q.qsize()
         if self.test_performer:
-            data['test_performer_alive'] = self.test_performer.isAlive()
+            data['test_performer_is_finished'] = self.test_performer.is_finished()
         return data

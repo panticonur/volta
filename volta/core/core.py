@@ -137,8 +137,7 @@ class Core(object):
     @property
     def artifacts_dir(self):
         if not self._artifacts_dir:
-            #dir_name = "{dir}/{id}".format(dir=self.config.get_option(self.SECTION, 'artifacts_dir'), id=self.test_id)
-            dir_name = self.config.get_option(self.SECTION, 'artifacts_dir')
+            dir_name = "{dir}".format(dir=self.config.get_option(self.SECTION, 'artifacts_dir'), id=self.test_id)
             if not os.path.isdir(dir_name):
                 os.makedirs(dir_name)
             os.chmod(dir_name, 0o755)
@@ -205,20 +204,6 @@ class Core(object):
                 self.event_listeners[type_].append(self.uploader)
             self.grabber_listeners.append(self.uploader)
 
-        if 'phone' in self.enabled_modules:
-            self.phone.prepare()
-
-        if 'sync' in self.enabled_modules:
-            self.sync.sample_rate = self.volta.sample_rate
-            self.grabber_listeners.append(self.sync)
-            self.event_listeners['sync'].append(self.sync)
-
-        if 'uploader' in self.enabled_modules:
-            for type_, fname in self.event_fnames.items():
-                self.event_listeners[type_].append(self.uploader)
-            self.grabber_listeners.append(self.uploader)
-            self.uploader.create_job()
-
             self._artifacts_dir = self.artifacts_dir+'/'+str(self.uploader.jobno)
             if not os.path.isdir(self._artifacts_dir):
                 os.makedirs(self._artifacts_dir)
@@ -230,6 +215,14 @@ class Core(object):
                     data=key
                 ) for key in self.event_types
             }
+
+        if 'phone' in self.enabled_modules:
+            self.phone.prepare()
+
+        if 'sync' in self.enabled_modules:
+            self.sync.sample_rate = self.volta.sample_rate
+            self.grabber_listeners.append(self.sync)
+            self.event_listeners['sync'].append(self.sync)
 
         if 'console' in self.enabled_modules:
             for type_, fname in self.event_fnames.items():

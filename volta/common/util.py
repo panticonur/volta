@@ -219,6 +219,7 @@ def prepare_logstring(data, regexp, type_):
     """
     formatter = {
         'android': format_ts_from_android,
+        'abro': format_ts_from_android,
         'iphone': format_ts_from_iphone
     }
 
