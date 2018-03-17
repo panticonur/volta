@@ -4,6 +4,7 @@ import queue as q
 import threading
 import time
 
+from retrying import retry, RetryError
 from urlparse import urlparse
 from volta.common.interfaces import DataListener
 
@@ -15,26 +16,19 @@ requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
 
+RETRY_ARGS = dict(
+    wrap_exception=True,
+    stop_max_delay=10000,
+    wait_fixed=1000,
+    stop_max_attempt_number=5
+)
 
-def send_chunk(url, data, timeout=10):
-    """ TODO: add more stable and flexible retries """
-    try:
-        r = requests.post(url, data=data, verify=False, timeout=timeout)
-    except (requests.ConnectionError, requests.ConnectTimeout):
-        logger.debug('Connection error, retrying in 1 sec...', exc_info=True)
-        time.sleep(1)
-        try:
-            r = requests.post(url, data=data, verify=False, timeout=timeout)
-        except (requests.ConnectionError, requests.ConnectTimeout):
-            logger.warning('Failed retrying sending data. Dropped')
-            logger.debug('Failed retrying sending data. Dropped', exc_info=True)
-        else:
-            return r
-    else:
-        if r.status_code != 200:
-            logger.warning('Request w/ bad status code: %s. Error message:\n%s. Data: %s',
-                           r.status_code, r.text, data)
-        return r
+
+@retry(**RETRY_ARGS)
+def send_chunk(url, data, timeout=5):
+    r = requests.post(url, data=data, verify=False, timeout=timeout)
+    r.raise_for_status()
+    return r
 
 
 class DataUploader(DataListener):
@@ -87,21 +81,23 @@ class DataUploader(DataListener):
             'component': self.config.get_option('uploader', 'component')
         }
         url = "{url}{path}".format(url=self.hostname, path=self.create_job_url)
-        req = send_chunk(url, data)
-        if req:
+        try:
+            req = send_chunk(url, data)
+        except RetryError:
+            logger.warning('Failed to create Lunapark job')
+            logger.debug('Failed to create Lunapark job', exc_info=True)
+            raise RuntimeError('Failed to create Lunapark job')
+        else:
             logger.debug('Lunapark create job status: %s', req.status_code)
             logger.debug('Req data: %s\nAnsw data: %s', data, req.json())
-            req.raise_for_status()
 
-            if not req.json()['success']:
+            if not req.json().get('success'):
                 raise RuntimeError('Lunapark id not created: %s' % req.json()['error'])
             else:
-                self.jobno = req.json()['jobno']
+                self.jobno = req.json().get('jobno')
                 logger.info('Lunapark test id: %s', self.jobno)
                 logger.info('Report url: %s/mobile/%s', self.hostname, self.jobno)
                 #self.dump_jobno_to_file()
-        else:
-            raise RuntimeError('Failed to create Lunapark test_id, is there a connection to Lunapark?')
 
     def dump_jobno_to_file(self):
         try:
@@ -114,11 +110,14 @@ class DataUploader(DataListener):
 
     def update_job(self, data):
         url = "{url}{path}".format(url=self.hostname, path=self.update_job_url)
-        req = send_chunk(url, data)
-        if req:
+        try:
+            req = send_chunk(url, data)
+        except RetryError:
+            logger.warning('Failed to update job metadata')
+            logger.debug('Failed to update job metadata', exc_info=True)
+        else:
             logger.debug('Lunapark update job status: %s', req.status_code)
             logger.debug('Req data: %s\nAnsw data: %s', data, req.json())
-            req.raise_for_status()
 
     def get_info(self):
         """ mock """
@@ -170,7 +169,11 @@ class WorkerThread(threading.Thread):
                     query="INSERT INTO {table} FORMAT TSV".format(
                         table=self.uploader.data_types_to_tables[type_])
                 )
-                send_chunk(url, prepared_body)
+                try:
+                    send_chunk(url, prepared_body)
+                except RetryError:
+                    logger.warning('Failed to send chunk via uploader. Dropped')
+                    logger.debug('Failed to send chunk via uploader. Dropped: %s %s', url, prepared_body)
 
     def __prepare_batch_of_chunks(self, q_data):
         pending_data = {}
