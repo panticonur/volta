@@ -104,8 +104,13 @@ class YattorReader(object):
             #chunk = np.frombuffer(buffer=self.floatBuffer, dtype=np.float32, count=amount)
             chunk = np.frombuffer(buffer=self.wordBuffer, dtype=np.uint16, count=amount)#.astype(np.float32)
             return chunk
-        else:
+        if amount==0:
+            work = self.lib.yattor_working();
+            if work!=0:
+                raise RuntimeError('yattor error: yattor_read_milliampere - yattor_working "'+str(work)+'"')
             time.sleep(0.5)
+        else:
+            raise RuntimeError('yattor error: yattor_read_milliampere "'+str(amount)+'"')
 
 
     """def _read_chunk(self):
