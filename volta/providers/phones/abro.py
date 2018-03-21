@@ -117,3 +117,6 @@ class Abro(Phone):
         if self.test_performer:
             data['test_performer_is_finished'] = self.test_performer.is_finished()
         return data
+
+    def close(self):
+        pass
