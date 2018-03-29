@@ -30,7 +30,7 @@ class YattorBox(VoltaBox):
         self.sample_rate = 10000 # config.get_option('volta', 'sample_rate', 10000)
         self.chop_ratio = config.get_option('volta', 'chop_ratio', 1)
         self.grab_timeout = config.get_option('volta', 'grab_timeout', 1)
-        if self.lib.yattor_open(self.serialNumber, 1)!=0:
+        if self.lib.yattor_open(self.serialNumber, 0)!=0:
             RuntimeError("Unable to open yattor")
         self.grabber_q = None
 
@@ -68,7 +68,7 @@ class YattorBox(VoltaBox):
         else:
             self.pipeline.join(10)
         self.lib.yattor_close()
-        del self.lib
+        #del self.lib
 
 
     def get_info(self):

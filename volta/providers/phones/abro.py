@@ -44,6 +44,7 @@ class Abro(Phone):
         self.logcat_pipeline = None
         self.test_performer = None
         self.phone_q = None
+        self.ADB_CMD =  config.get_option('phone', 'util', 'adb')
 
 
     def adb_execution(self, cmd):
@@ -72,7 +73,7 @@ class Abro(Phone):
 
 
     def prepare(self):
-        self.adb_execution("adb -s {device_id} logcat -c".format(device_id=self.source))
+        self.adb_execution(self.ADB_CMD+' -s '+self.source+' logcat -c')
 
 
     def start(self, results):
@@ -81,7 +82,7 @@ class Abro(Phone):
 
 
     def __start_async_logcat(self):
-        cmd = "adb -s {device_id} logcat -v time".format(device_id=self.source)
+        cmd = self.ADB_CMD+' -s '+self.source+' logcat -v time'
         self.worker = Executioner(cmd)
         out_q, err_q = self.worker.execute()
 
