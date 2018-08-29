@@ -13,6 +13,7 @@ from volta.common.util import Executioner, LogParser
 logger = logging.getLogger(__name__)
 
 
+# FIXME a lot of false-positive matches for iphone messages w/ that regexp
 iphone_logevent_re = r"""
     ^(?P<month>\S+)
     \s+
@@ -22,7 +23,7 @@ iphone_logevent_re = r"""
     \s+
     \S+
     \s+
-    (?P<message>.*)
+    (?P<value>.*)
     $
     """
 
@@ -37,12 +38,12 @@ class iPhone(Phone):
     Todo:
         unlug_type manual
     """
-    def __init__(self, config):
+    def __init__(self, config, core):
         """
         Args:
             config (VoltaConfig): module configuration data
         """
-        Phone.__init__(self, config)
+        Phone.__init__(self, config, core)
         self.log_stdout_reader = None
         self.log_stderr_reader = None
         self.drain_log_stdout = None
@@ -58,7 +59,19 @@ class iPhone(Phone):
             raise RuntimeError(
                 "Unable to parse specified regexp: %s" % config.get_option('phone', 'event_regexp', iphone_logevent_re)
             )
+        self.my_metrics = {}
+        self.__create_my_metrics()
+
         self.__test_interaction_with_phone()
+
+    def __create_my_metrics(self):
+        self.my_metrics['events'] = self.core.data_session.new_metric(
+            {
+                'type': 'events',
+                'name': 'events',
+                'source': 'phone'
+            }
+        )
 
     def __test_interaction_with_phone(self):
         def read_process_queues_and_report(outs_q, errs_q):
@@ -74,6 +87,17 @@ class iPhone(Phone):
             errors = get_nowait_from_queue(errs_q)
             if errors:
                 worker.close()
+                # FIXME
+                # keep in mind this Sierra bug:
+                # https://discussions.apple.com/thread/7690618
+                # that causes:
+                # RuntimeError:
+                # There were errors trying to test connection to the phone 0x819CE30D080A6.
+                # Errors :
+                # ['cfgutil: error: Error Domain=NSCocoaErrorDomain Code=4097
+                # "connection to service named com.apple.configurator.xpc.InternetService"
+                # UserInfo={NSDebugDescription=connection to service named com.apple.configurator.xpc.InternetService}
+                # FIXME
                 raise RuntimeError(
                     'There were errors trying to test connection to the phone %s. Errors :%s' % (
                         self.source, errors
@@ -132,9 +156,12 @@ class iPhone(Phone):
             LogParser(
                 out_q, self.compiled_regexp, self.config.get_option('phone', 'type')
             ),
-            self.phone_q
+            self.my_metrics['events']
         )
         self.logcat_pipeline.start()
+
+    def close(self):
+        pass
 
     def get_info(self):
         data = {}
