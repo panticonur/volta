@@ -164,7 +164,7 @@ class LogParser(object):
                         ready_to_go_chunks.append(ready_to_go_chunk)
                 else:
                     if not self.buffer:
-                        logger.warn('Trash data in logs, dropped data: \n%s', chunk)
+                        logger.debug('Trash data in logs, dropped data: \n%s', chunk)
                     else:
                         self.buffer[0]['value'] = self.buffer[0]['value'] + str(chunk)
             return ready_to_go_chunks
@@ -219,7 +219,7 @@ class LogParser(object):
             pandas.DataFrame, fmt: ['sys_uts', 'message']
         """
         formatter = {
-            'android': format_ts_from_android,
+            'android': format_ts_from_android, 'abro': format_ts_from_android,
             'iphone': format_ts_from_iphone
         }
         try:

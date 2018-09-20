@@ -2,6 +2,7 @@ import logging
 import re
 import pkg_resources
 import time
+import threading
 
 from netort.data_processing import Drain, get_nowait_from_queue
 from netort.resource import manager as resource
@@ -21,14 +22,14 @@ event_regexp = r"""
     \s+
     (?P<tag>(\S+?)\s*\(\s*\d+\))
     :\s+
-    (?P<message>.*)
+    (?P<value>.*)
     $
     """
 
 
 class Abro(Phone):
-    def __init__(self, config):
-        Phone.__init__(self, config)
+    def __init__(self, config, core):
+        Phone.__init__(self, config, core)
         self.logcat_stdout_reader = None
         self.logcat_stderr_reader = None
         self.source = config.get_option('phone', 'source')
@@ -45,6 +46,33 @@ class Abro(Phone):
         self.test_performer = None
         self.phone_q = None
         self.ADB_CMD =  config.get_option('phone', 'util', 'adb')
+        self.worker = None
+        self.closed = False
+        self.shellexec_metrics = config.get_option('phone', 'shellexec_metrics')
+        self.shellexec_executor = threading.Thread(target=self.__shell_executor)
+        self.shellexec_executor.setDaemon(True)
+        self.shellexec_executor.start()
+        self.my_metrics = {}
+        self.__create_my_metrics()
+
+
+    def __create_my_metrics(self):
+        self.my_metrics['events'] = self.core.data_session.new_metric(
+            {
+                'type': 'events',
+                'name': 'events',
+                'source': 'phone'
+            }
+        )
+        for key, value in self.shellexec_metrics.items():
+            self.my_metrics[key] = self.core.data_session.new_metric(
+                {
+                    'type': 'metrics',
+                    'name': key,
+                    'source': 'phone',
+                    '_apply': value.get('apply') if value.get('apply') else '',
+                }
+            )
 
 
     def adb_execution(self, cmd):
@@ -53,11 +81,8 @@ class Abro(Phone):
             for chunk in outputs:
                 logger.debug('Command \'%s\' output: %s', cmd, chunk.strip('\n'))
             errors = get_nowait_from_queue(errs_q)
-            if errors:
-                worker.close()
-                raise RuntimeError(
-                    'There were errors executing \'%s\' on device %s. Errors :%s' % (cmd, self.source, errors)
-                )
+            for err_chunk in errors:
+                logger.warn('Errors in command \'%s\' output: %s', cmd, err_chunk.strip('\n'))
         worker = Executioner(cmd)
         outs_q, errs_q = worker.execute()
         while worker.is_finished() is None:
@@ -90,7 +115,7 @@ class Abro(Phone):
             LogParser(
                 out_q, self.compiled_regexp, self.config.get_option('phone', 'type')
             ),
-            self.phone_q
+            self.my_metrics['events']
         )
         self.logcat_pipeline.start()
 
@@ -104,11 +129,17 @@ class Abro(Phone):
 
 
     def end(self):
-        self.worker.close()
+        self.closed = True
+        if self.worker:
+            self.worker.close()
         if self.test_performer:
             self.test_performer.close()
         if self.logcat_pipeline:
             self.logcat_pipeline.close()
+
+
+    def close(self):
+        pass
 
 
     def get_info(self):
@@ -119,5 +150,39 @@ class Abro(Phone):
             data['test_performer_is_finished'] = self.test_performer.is_finished()
         return data
 
-    def close(self):
-        pass
+
+    def __shell_executor(self):
+        while not self.closed:
+            for key, value in self.shellexec_metrics.items():
+                try:
+                    if not self.shellexec_metrics[key].get('last_ts') \
+                            or self.shellexec_metrics[key]['last_ts'] < int(time.time()) * 10**6:
+                        metric_value = self.__execute_shellexec_metric(value.get('cmd'))
+                        ts = int(time.time()) * 10 ** 6
+                        if not value.get('start_time'):
+                            self.shellexec_metrics[key]['start_time'] = ts
+                            ts = 0
+                        else:
+                            ts = ts - self.shellexec_metrics[key]['start_time']
+                            self.shellexec_metrics[key]['last_ts'] = ts
+                        self.my_metrics[key].put(
+                            pd.DataFrame(
+                                data={
+                                    ts:
+                                        {'ts': ts, 'value': metric_value}
+                                },
+                            ).T
+                        )
+                    else:
+                        continue
+                except Exception:
+                    logger.warning('Failed to collect shellexec metric: %s', key)
+                    logger.debug('Failed to collect shellexec metric: %s', key, exc_info=True)
+            time.sleep(0.1)
+
+
+    @staticmethod
+    def __execute_shellexec_metric(cmd):
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+        (stdout, stderr) = proc.communicate()
+        return stdout.strip('\n')

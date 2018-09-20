@@ -8,7 +8,6 @@ from volta.common.interfaces import VoltaBox
 from volta.common.util import TimeChopper, string_to_np
 
 from netort.data_processing import Drain
-from netort.resource import manager as resource
 
 from ctypes import *
 # https://docs.python.org/2/library/ctypes.html
@@ -23,8 +22,8 @@ class YattorBox(VoltaBox):
         chop_ratio (int): chop ratio for incoming data, 1 means 1 second (500 for sample_rate 500)
         grab_timeout (int): timeout for grabber
     """
-    def __init__(self, config):
-        VoltaBox.__init__(self, config)
+    def __init__(self, config, core):
+        VoltaBox.__init__(self, config, core)
         self.lib = CDLL("libyattor.so")
         self.serialNumber = int(config.get_option('volta', 'source'))
         self.sample_rate = 10000 # config.get_option('volta', 'sample_rate', 10000)
@@ -33,6 +32,17 @@ class YattorBox(VoltaBox):
         if self.lib.yattor_open(self.serialNumber, 0)!=0:
             RuntimeError("Unable to open yattor")
         self.grabber_q = None
+        self.my_metrics = {}
+        self.__create_my_metrics()
+
+    def __create_my_metrics(self):
+        self.my_metrics['current'] = self.core.data_session.new_metric(
+            {
+                'type': 'metrics',
+                'name': 'current',
+                'source': 'voltabox'
+            }
+        )
 
 
     def start_test(self, results):
@@ -47,7 +57,7 @@ class YattorBox(VoltaBox):
             TimeChopper(
                 self.reader, self.sample_rate, self.chop_ratio
             ),
-            self.grabber_q
+            self.my_metrics['current']
         )
         logger.info('Starting grab thread...')
         self.pipeline.start()
@@ -68,7 +78,6 @@ class YattorBox(VoltaBox):
         else:
             self.pipeline.join(10)
         self.lib.yattor_close()
-        #del self.lib
 
 
     def get_info(self):
@@ -101,10 +110,8 @@ class YattorReader(object):
             chunk = chunk * 1000
             return chunk
         if amount==0:
-            work = self.lib.yattor_working();
-            if work!=0:
-                raise RuntimeError('yattor not working "'+str(work)+'"')
-            time.sleep(0.5)
+            if self.lib.yattor_working():
+                time.sleep(0.5)
         else:
             raise RuntimeError('yattor error: yattor_read_ampere "'+str(amount)+'"')
 
