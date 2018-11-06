@@ -308,4 +308,4 @@ class Core(object):
                 except AttributeError:
                     logger.info('Unable to get per_module %s current test info', per_module, exc_info=True)
                     pass
-        return self.data_session.clients[0].job_number #response
+        return self.data_session.clients[1].job_number #response
